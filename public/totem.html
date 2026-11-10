@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Totem · Senhas do Açougue</title>
+<link rel="stylesheet" href="/css/base.css">
+<style>
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center;
+         gap: 4vmin; padding: 4vmin; user-select: none; -webkit-user-select: none; overflow: hidden; }
+  .topo { padding: 3vmin 5vmin; text-align: center; width: min(92vw, 900px); }
+  .topo .logo { width: min(60vmin, 520px); margin: 0 auto; }
+  .topo h1 { margin: 2vmin 0 0; font-size: clamp(1.6rem, 5vmin, 3.2rem); letter-spacing: .04em; }
+  .topo p { margin: .5vmin 0 0; font-size: clamp(1rem, 3vmin, 1.8rem); color: var(--cinza); }
+  .botoes { display: flex; gap: 4vmin; width: min(92vw, 900px); }
+  @media (orientation: portrait) { .botoes { flex-direction: column; } }
+  .tipo { flex: 1; min-height: 28vmin; border-radius: 28px; padding: 4vmin; display: flex;
+          flex-direction: column; align-items: center; justify-content: center; gap: 1.5vmin;
+          box-shadow: 0 8px 0 rgba(0,0,0,.18); transition: transform .08s; }
+  .tipo:active { transform: translateY(6px); box-shadow: 0 2px 0 rgba(0,0,0,.18); }
+  .tipo b { font-size: clamp(2rem, 7vmin, 4.4rem); }
+  .tipo span { font-size: clamp(1rem, 2.8vmin, 1.6rem); }
+  .normal { background: var(--azul); color: var(--branco); }
+  .pref { background: var(--amarelo); color: var(--azul); border: 6px solid var(--azul); }
+  .retire { position: fixed; inset: 0; background: rgba(0, 53, 97, .92); color: var(--branco);
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2vmin; }
+  .retire .num { font-size: clamp(5rem, 28vmin, 16rem); font-weight: 800; color: var(--amarelo); line-height: 1; }
+  .retire p { font-size: clamp(1.4rem, 5vmin, 3rem); margin: 0; text-align: center; }
+  .rodape { position: fixed; bottom: 1.5vmin; font-size: 1rem; color: var(--azul); font-weight: 600; }
+  /* Ticket para impressão pelo navegador (teste ou RawBT) */
+  #ticket { display: none; }
+  @media print {
+    @page { size: 80mm auto; margin: 0; }
+    body { background: none !important; display: block; padding: 0; }
+    body > *:not(#ticket) { display: none !important; }
+    #ticket { display: block; width: 72mm; margin: 0 auto; text-align: center; color: #000; font-family: Arial, sans-serif; }
+    #ticket img { width: 50mm; filter: grayscale(1) contrast(1.4); }
+    #ticket .setor { font-size: 14pt; font-weight: 700; margin: 2mm 0; }
+    #ticket .cod { font-size: 44pt; font-weight: 800; margin: 2mm 0; }
+    #ticket .t { font-size: 12pt; }
+    #ticket .p { font-size: 10pt; margin-top: 3mm; }
+  }
+</style>
+</head>
+<body>
+  <div class="topo cartao">
+    <img class="logo" src="/img/logo.png" alt="Megabox Supermercado">
+    <h1>AÇOUGUE</h1>
+    <p>Toque para retirar sua senha</p>
+  </div>
+
+  <div class="botoes">
+    <button class="tipo normal" data-tipo="N"><b>NORMAL</b><span>Atendimento geral</span></button>
+    <button class="tipo pref" data-tipo="P"><b>PREFERENCIAL</b><span>Idosos 60+, gestantes, lactantes, pessoas com deficiência e com criança de colo</span></button>
+  </div>
+
+  <div class="rodape" id="status"></div>
+
+  <div class="retire oculto" id="retire">
+    <p>Sua senha é</p>
+    <div class="num" id="retireNum"></div>
+    <p id="retireMsg">Retire o papel e aguarde ser chamado no painel</p>
+  </div>
+
+  <div id="ticket">
+    <img src="/img/logo.png" alt="">
+    <div class="setor">AÇOUGUE</div>
+    <div class="t" id="tkTipo"></div>
+    <div class="cod" id="tkCod"></div>
+    <div class="t" id="tkData"></div>
+    <div class="p">Aguarde ser chamado no painel</div>
+  </div>
+
+<script src="/js/comum.js"></script>
+<script>
+  const chave = Senhas.chaveLoja();
+  const botoes = document.querySelectorAll('.tipo');
+  const status = document.getElementById('status');
+  if (!chave) status.textContent = 'Configure a chave da loja no endereço (?chave=...)';
+
+  function imprimir(s) {
+    const d = new Date(s.emitida_em);
+    const dados = {
+      codigo: s.codigo,
+      tipo: s.tipo === 'P' ? 'PREFERENCIAL' : 'NORMAL',
+      data: d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+      hora: d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }),
+    };
+    // No app Android do totem, a impressão vai direto para a TM-T20X pelo USB.
+    if (window.AndroidImpressora) {
+      const r = window.AndroidImpressora.imprimir(JSON.stringify(dados));
+      return r === 'ok' ? null : r;
+    }
+    // Fora do app: imprime pelo navegador (útil para testes ou com o app RawBT).
+    document.getElementById('tkTipo').textContent = dados.tipo;
+    document.getElementById('tkCod').textContent = dados.codigo;
+    document.getElementById('tkData').textContent = dados.data + ' ' + dados.hora;
+    window.print();
+    return null;
+  }
+
+  async function retirar(tipo) {
+    botoes.forEach((b) => (b.disabled = true));
+    try {
+      const s = await Senhas.api('/api/senhas', { metodo: 'POST', corpo: { tipo }, chave });
+      const falha = imprimir(s);
+      document.getElementById('retireNum').textContent = s.codigo;
+      document.getElementById('retireMsg').textContent = falha
+        ? 'Impressora com problema. Memorize sua senha e aguarde no painel.'
+        : 'Retire o papel e aguarde ser chamado no painel';
+      document.getElementById('retire').classList.remove('oculto');
+      status.textContent = '';
+      setTimeout(() => {
+        document.getElementById('retire').classList.add('oculto');
+        botoes.forEach((b) => (b.disabled = false));
+      }, falha ? 8000 : 4000);
+    } catch (e) {
+      status.textContent = 'Não foi possível gerar a senha: ' + e.message;
+      setTimeout(() => botoes.forEach((b) => (b.disabled = false)), 1500);
+    }
+  }
+
+  botoes.forEach((b) => b.addEventListener('click', () => retirar(b.dataset.tipo)));
+</script>
+</body>
+</html>

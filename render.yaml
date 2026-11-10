@@ -1,0 +1,31 @@
+# Hospedagem no Render (render.com): New > Blueprint > escolha este repositório.
+services:
+  - type: web
+    name: senhas-acougue
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/saude
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: senhas-acougue-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "false"
+      - key: CHAVE_LOJA
+        generateValue: true
+      - key: SEGREDO_SESSAO
+        generateValue: true
+      - key: SENHA_OPERADOR
+        sync: false
+      - key: SENHA_DONO
+        sync: false
+      - key: NORMAIS_POR_PREFERENCIAL
+        value: "2"
+
+databases:
+  - name: senhas-acougue-db
+    plan: basic-256mb
+    databaseName: senhas

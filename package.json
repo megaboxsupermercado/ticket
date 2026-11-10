@@ -1,0 +1,19 @@
+{
+  "name": "senhas-acougue",
+  "version": "1.0.0",
+  "description": "Sistema de senhas do açougue: totem, painel, operador e relatórios",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^4.22.3",
+    "pg": "^8.23.1",
+    "socket.io": "^4.8.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
+}

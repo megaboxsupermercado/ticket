@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operador · Senhas do Açougue</title>
+<link rel="stylesheet" href="/css/base.css">
+<style>
+  .tela { max-width: 640px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  .topo { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; }
+  .topo img { height: 44px; }
+  .topo button { background: none; color: var(--azul); text-decoration: underline; font-weight: 600; }
+  .atual { padding: 20px; text-align: center; }
+  .atual small { display: block; color: var(--cinza); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
+  .atual .codigo { font-size: clamp(4rem, 22vw, 8rem); font-weight: 900; line-height: 1.05; }
+  .atual .info { color: var(--cinza); font-weight: 600; }
+  .espera { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .espera div { padding: 14px; text-align: center; }
+  .espera b { display: block; font-size: 2.4rem; }
+  .acoes { display: grid; gap: 12px; }
+  .acoes .proxima { font-size: 1.8rem; padding: 22px; }
+  .acoes .linha { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .acoes .linha .btn { padding: 16px 8px; font-size: 1rem; }
+</style>
+</head>
+<body>
+  <form class="login cartao oculto" id="formLogin">
+    <img class="logo" src="/img/logo.png" alt="Megabox Supermercado">
+    <h1>Entrar no balcão</h1>
+    <input id="nome" placeholder="Seu nome" autocomplete="name" required>
+    <input id="senha" type="password" placeholder="Senha do operador" required>
+    <button class="btn" type="submit">Entrar</button>
+    <div class="aviso-erro" id="erroLogin"></div>
+  </form>
+
+  <main class="tela oculto" id="tela">
+    <div class="topo cartao">
+      <img src="/img/logo.png" alt="Megabox">
+      <span id="quem"></span>
+      <button id="sair" type="button">Sair</button>
+    </div>
+    <div class="atual cartao">
+      <small>Em atendimento</small>
+      <div class="codigo" id="codigo">---</div>
+      <div class="info" id="info">Nenhuma senha chamada</div>
+    </div>
+    <div class="espera">
+      <div class="cartao"><b id="espN">0</b>normais aguardando</div>
+      <div class="cartao"><b id="espP">0</b>preferenciais aguardando</div>
+    </div>
+    <div class="acoes">
+      <button class="btn proxima" id="proxima">Chamar próxima</button>
+      <div class="linha">
+        <button class="btn secundario" id="repetir">Repetir chamada</button>
+        <button class="btn verde" id="finalizar">Finalizar atendimento</button>
+        <button class="btn vermelho" id="ausente">Cliente ausente</button>
+      </div>
+    </div>
+    <div class="aviso-erro" id="erro"></div>
+  </main>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/comum.js"></script>
+<script>
+  const el = (id) => document.getElementById(id);
+  let token = Senhas.ler('tokenOperador');
+  let atual = null, timer = null, socket = null;
+
+  function mostrarLogin() {
+    el('formLogin').classList.remove('oculto'); el('tela').classList.add('oculto');
+  }
+  function mostrarTela() {
+    el('formLogin').classList.add('oculto'); el('tela').classList.remove('oculto');
+    el('quem').textContent = Senhas.ler('nomeOperador') || '';
+  }
+
+  function render(est) {
+    atual = est.atual;
+    el('espN').textContent = est.espera.N; el('espP').textContent = est.espera.P;
+    el('codigo').textContent = atual ? atual.codigo : '---';
+    ['repetir', 'finalizar', 'ausente'].forEach((b) => (el(b).disabled = !atual));
+    clearInterval(timer);
+    const tick = () => {
+      if (!atual) { el('info').textContent = 'Nenhuma senha chamada'; return; }
+      const seg = Math.max(0, Math.round((Date.now() - new Date(atual.chamada_em)) / 1000));
+      el('info').textContent = (atual.tipo === 'P' ? 'Preferencial' : 'Normal') + ' · chamada há ' + Senhas.minutos(seg);
+    };
+    tick(); timer = setInterval(tick, 1000);
+  }
+
+  async function acao(caminho, corpo) {
+    el('erro').textContent = '';
+    document.querySelectorAll('.acoes button').forEach((b) => (b.disabled = true));
+    try {
+      render(await Senhas.api(caminho, { metodo: caminho.endsWith('estado') ? 'GET' : 'POST', corpo, token }));
+    } catch (e) {
+      if (e.status === 401) return sair();
+      el('erro').textContent = e.message;
+      el('proxima').disabled = false;
+    } finally {
+      el('proxima').disabled = false;
+    }
+  }
+
+  function conectar() {
+    if (socket) socket.disconnect();
+    socket = io({ auth: { token } });
+    socket.on('estado', (e) => { el('espN').textContent = e.espera.N; el('espP').textContent = e.espera.P; });
+  }
+
+  function sair() {
+    token = null; Senhas.apagar('tokenOperador');
+    if (socket) socket.disconnect();
+    mostrarLogin();
+  }
+
+  el('formLogin').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    el('erroLogin').textContent = '';
+    try {
+      const r = await Senhas.api('/api/login', { metodo: 'POST', corpo: { perfil: 'operador', nome: el('nome').value, senha: el('senha').value } });
+      token = r.token;
+      Senhas.guardar('tokenOperador', token); Senhas.guardar('nomeOperador', el('nome').value.trim());
+      mostrarTela(); conectar(); acao('/api/operador/estado');
+    } catch (e) { el('erroLogin').textContent = e.message; }
+  });
+  el('sair').addEventListener('click', sair);
+  el('proxima').addEventListener('click', () => acao('/api/operador/proxima'));
+  el('repetir').addEventListener('click', () => atual && acao('/api/operador/repetir', { id: atual.id }));
+  el('finalizar').addEventListener('click', () => atual && acao('/api/operador/finalizar', { id: atual.id }));
+  el('ausente').addEventListener('click', () => atual && confirm('Marcar ' + atual.codigo + ' como ausente?') && acao('/api/operador/ausente', { id: atual.id }));
+
+  if (token) { mostrarTela(); conectar(); acao('/api/operador/estado'); } else mostrarLogin();
+</script>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel · Senhas do Açougue</title>
+<link rel="stylesheet" href="/css/base.css">
+<style>
+  body { overflow: hidden; display: grid; grid-template-columns: 1fr 34vw; gap: 3vmin; padding: 3vmin; height: 100vh; }
+  .principal { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 3vmin; }
+  .rotulo { font-size: 6vmin; font-weight: 800; letter-spacing: .12em; margin: 0; }
+  .tipo { font-size: 4.2vmin; font-weight: 700; margin: 1vmin 0 0; padding: .6vmin 3vmin; border-radius: 999px; }
+  .tipo.N { background: var(--azul); color: var(--branco); }
+  .tipo.P { background: var(--amarelo); color: var(--azul); border: 3px solid var(--azul); }
+  .codigo { font-size: 30vmin; font-weight: 900; line-height: 1; margin: 2vmin 0; color: var(--azul); font-variant-numeric: tabular-nums; }
+  .vazio { font-size: 5vmin; color: var(--cinza); }
+  .lateral { display: grid; grid-template-rows: auto 1fr auto; gap: 3vmin; min-height: 0; }
+  .marca { padding: 2.5vmin; text-align: center; }
+  .marca .logo { margin: 0 auto; max-height: 20vh; }
+  .marca h2 { margin: 1vmin 0 0; font-size: 4vmin; letter-spacing: .1em; }
+  .ultimas { padding: 2.5vmin 3vmin; overflow: hidden; }
+  .ultimas h3 { margin: 0 0 1.5vmin; font-size: 3.2vmin; color: var(--cinza); text-transform: uppercase; letter-spacing: .08em; }
+  .ultimas ol { list-style: none; margin: 0; padding: 0; display: grid; gap: .8vmin; }
+  .ultimas li { display: flex; justify-content: space-between; align-items: baseline; font-size: 5vmin; font-weight: 800;
+                border-bottom: 2px solid #e5ebf0; padding-bottom: .8vmin; }
+  .ultimas li small { font-size: 2.6vmin; font-weight: 600; color: var(--cinza); }
+  .relogio { padding: 2vmin; text-align: center; font-size: 6vmin; font-weight: 800; background: var(--azul); color: var(--branco); }
+  .relogio small { display: block; font-size: 2.4vmin; font-weight: 500; opacity: .85; }
+  @keyframes pisca { 0%, 100% { background: var(--branco); } 50% { background: var(--amarelo); } }
+  .chamando { animation: pisca .5s ease-in-out 6; }
+  .ativar { position: fixed; inset: 0; background: rgba(0, 53, 97, .9); color: var(--branco); display: flex;
+            align-items: center; justify-content: center; font-size: 5vmin; font-weight: 700; text-align: center; padding: 5vmin; cursor: pointer; }
+  .offline { position: fixed; left: 50%; top: 2vmin; transform: translateX(-50%); background: var(--vermelho); color: #fff;
+             padding: 1vmin 3vmin; border-radius: 999px; font-size: 2.4vmin; font-weight: 700; }
+</style>
+</head>
+<body>
+  <section class="principal cartao" id="principal">
+    <p class="rotulo">SENHA</p>
+    <div class="codigo" id="codigo">---</div>
+    <p class="tipo oculto" id="tipo"></p>
+    <p class="vazio" id="vazio">Aguardando a primeira chamada</p>
+  </section>
+
+  <aside class="lateral">
+    <div class="marca cartao">
+      <img class="logo" src="/img/logo.png" alt="Megabox Supermercado">
+      <h2>AÇOUGUE</h2>
+    </div>
+    <div class="ultimas cartao">
+      <h3>Últimas chamadas</h3>
+      <ol id="ultimas"></ol>
+    </div>
+    <div class="relogio cartao" id="relogio"></div>
+  </aside>
+
+  <div class="ativar oculto" id="ativar">Toque na tela uma vez para ativar o som do painel</div>
+  <div class="offline oculto" id="offline">Sem conexão com o servidor</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/comum.js"></script>
+<script>
+  const chave = Senhas.chaveLoja();
+  const el = (id) => document.getElementById(id);
+  const TZ = { timeZone: 'America/Sao_Paulo' };
+  const hora = (t) => new Date(t).toLocaleTimeString('pt-BR', { ...TZ, hour: '2-digit', minute: '2-digit' });
+
+  function relogio() {
+    const d = new Date();
+    el('relogio').innerHTML = d.toLocaleTimeString('pt-BR', { ...TZ, hour: '2-digit', minute: '2-digit' }) +
+      '<small>' + d.toLocaleDateString('pt-BR', { ...TZ, weekday: 'long', day: '2-digit', month: 'long' }) + '</small>';
+  }
+  relogio(); setInterval(relogio, 10000);
+
+  function mostrar(estado) {
+    const a = estado.atual;
+    el('codigo').textContent = a ? a.codigo : '---';
+    el('vazio').classList.toggle('oculto', !!a);
+    el('tipo').classList.toggle('oculto', !a);
+    if (a) { el('tipo').textContent = a.tipo === 'P' ? 'PREFERENCIAL' : 'NORMAL'; el('tipo').className = 'tipo ' + a.tipo; }
+    el('ultimas').innerHTML = estado.anteriores.slice(0, 4)
+      .map((s) => `<li>${s.codigo}<small>${hora(s.chamada_em)}</small></li>`).join('');
+  }
+
+  // ----- Som e voz -----
+  let audio;
+  function contexto() {
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    return audio;
+  }
+  function plim() {
+    const ctx = contexto();
+    return new Promise((fim) => {
+      [[880, 0], [660, 0.35]].forEach(([f, t]) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
+        g.gain.exponentialRampToValueAtTime(0.6, ctx.currentTime + t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.6);
+        o.connect(g).connect(ctx.destination);
+        o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.65);
+      });
+      setTimeout(fim, 1000);
+    });
+  }
+  let voz = null;
+  function escolherVoz() {
+    const vs = speechSynthesis.getVoices();
+    voz = vs.find((v) => /pt[-_]BR/i.test(v.lang)) || vs.find((v) => /^pt/i.test(v.lang)) || null;
+  }
+  if ('speechSynthesis' in window) { escolherVoz(); speechSynthesis.onvoiceschanged = escolherVoz; }
+  function falar(texto) {
+    return new Promise((fim) => {
+      if (!('speechSynthesis' in window)) return fim();
+      const u = new SpeechSynthesisUtterance(texto);
+      u.lang = 'pt-BR'; u.rate = 0.9; if (voz) u.voice = voz;
+      u.onend = fim; u.onerror = fim;
+      speechSynthesis.speak(u);
+      setTimeout(fim, 6000);
+    });
+  }
+
+  // Chamadas entram numa fila para não falar duas senhas por cima uma da outra.
+  const filaAnuncios = [];
+  let anunciando = false;
+  async function anunciar() {
+    if (anunciando) return;
+    anunciando = true;
+    while (filaAnuncios.length) {
+      const c = filaAnuncios.shift();
+      const p = el('principal');
+      p.classList.remove('chamando'); void p.offsetWidth; p.classList.add('chamando');
+      try {
+        await plim();
+        const texto = `Senha ${c.tipo === 'P' ? 'preferencial' : 'normal'}, ${c.tipo}, ${c.numero}`;
+        await falar(texto);
+        await new Promise((r) => setTimeout(r, 400));
+        await falar(texto);
+      } catch (e) { console.error(e); }
+    }
+    anunciando = false;
+  }
+
+  function verificarSom() {
+    const ctx = contexto();
+    if (ctx.state === 'suspended') el('ativar').classList.remove('oculto');
+  }
+  el('ativar').addEventListener('click', () => {
+    contexto().resume(); falar(' ');
+    el('ativar').classList.add('oculto');
+  });
+  verificarSom();
+
+  // ----- Conexão em tempo real -----
+  const socket = io({ auth: { chave } });
+  socket.on('estado', mostrar);
+  socket.on('chamada', (c) => { filaAnuncios.push(c); anunciar(); });
+  socket.on('connect', () => el('offline').classList.add('oculto'));
+  socket.on('disconnect', () => el('offline').classList.remove('oculto'));
+</script>
+</body>
+</html>
